@@ -1,17 +1,12 @@
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 
 def loadAndCleanData():
     """
-    Load and clean the NFL kicker dataset from data.csv.
-    
-    Returns:
-    --------
-    pd.DataFrame
-        Cleaned dataset with calculated success rates
+    load and clean the NFL kicker dataset from data.csv to inform predictions.
     """
     try:
         kickerData = pd.read_csv('data.csv')
@@ -58,21 +53,13 @@ def loadAndCleanData():
 
 def prepareModelData(kickerData):
     """
-    Prepare data for prediction model.
+    prepare data for prediction model.
     
-    Parameters:
-    -----------
-    kickerData : pd.DataFrame
-        Cleaned kicker dataset
-    
-    Returns:
-    --------
-    tuple
-        X (features), y (labels), and feature columns
+    returns a tuple of x (features), y (labels), and feature columns
     """
     allKicks = []
     
-    for _, kicker in kickerData.iterrows():
+    for i, kicker in kickerData.iterrows():
         # Add kicks for each distance range
         ranges = [
             ('FG_1_19', 10), ('FG_20_29', 25), ('FG_30_39', 35),
@@ -94,42 +81,18 @@ def prepareModelData(kickerData):
 
 def trainPredictionModel(X, y):
     """
-    Train a logistic regression model.
-    
-    Parameters:
-    -----------
-    X : pd.DataFrame
-        Feature matrix
-    y : pd.Series
-        Target variable
-    
-    Returns:
-    --------
-    Pipeline
-        Trained model
+    train a random forest classifier model to predict odds of a kick being successfully made from a range.
     """
     model = Pipeline([
         ('scaler', StandardScaler()),
-        ('logistic', LogisticRegression(max_iter=1000))
+        ('rf', RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42))
     ])
     model.fit(X, y)
     return model
 
 def getLeagueAverage(kickerData, distance):
     """
-    Get league average success rate for a distance range.
-    
-    Parameters:
-    -----------
-    kickerData : pd.DataFrame
-        Cleaned kicker dataset
-    distance : int
-        Field goal distance
-    
-    Returns:
-    --------
-    float
-        League average success rate
+    get league average success rate for a distance range.
     """
     if distance <= 19:
         made, attempted = 'FG_1_19_Made', 'FG_1_19_Attempted'
@@ -150,30 +113,12 @@ def getLeagueAverage(kickerData, distance):
 
 def predictFgSuccess(model, kickerData, playerName, distance, featureCols):
     """
-    Predict field goal success probability.
-    
-    Parameters:
-    -----------
-    model : Pipeline
-        Trained model
-    kickerData : pd.DataFrame
-        Cleaned kicker dataset
-    playerName : str
-        Kicker name
-    distance : int
-        Field goal distance
-    featureCols : pd.Index
-        Feature columns from training
-    
-    Returns:
-    --------
-    float
-        Predicted success probability
+    predict field goal success probability using player stats & trained model. 
     """
     if playerName not in kickerData['Player'].values:
         return f"Player '{playerName}' not found"
     
-    # Check if player has attempts in the distance range
+    # Determine distance range and relevant columns
     if distance <= 19:
         rateCol, attemptsCol = 'fg1To19Rate', 'FG_1_19_Attempted'
     elif distance <= 29:
@@ -190,29 +135,57 @@ def predictFgSuccess(model, kickerData, playerName, distance, featureCols):
     playerData = kickerData[kickerData['Player'] == playerName]
     attempts = playerData[attemptsCol].values[0]
     
-    if attempts == 0:
-        print(f"Note: {playerName} has no attempts in this range. Using league average.")
-        return getLeagueAverage(kickerData, distance)
-    
-    # Prepare features
+    # Prepare features for model
     playerFeatures = pd.DataFrame(0, index=[0], columns=featureCols)
     playerFeatures['distance'] = distance
     playerCol = f'player_{playerName}'
     if playerCol in playerFeatures.columns:
         playerFeatures[playerCol] = 1
     
-    try:
-        probability = model.predict_proba(playerFeatures)[0][1]
-        return probability
-    except Exception as e:
-        print(f"Prediction error: {e}")
-        playerRate = playerData[rateCol].values[0]
+    # Use model prediction if sufficient attempts (at least 3)
+    if attempts >= 3:
+        try:
+            probability = model.predict_proba(playerFeatures)[0][1]
+            return probability
+        except Exception as e:
+            print(f"Prediction error: {e}")
+    
+    # Fallback: Use player's overall stats with minimal league average influence
+    print(f"Note: {playerName} has {attempts} attempts in this range. Using player's stats with statistical adjustment.")
+    
+    # Get player's overall success rate and attempts
+    playerOverallRate = playerData['overallFgRate'].values[0]
+    totalAttempts = playerData['totalFgAttempted'].values[0]
+    
+    # Handle case where player has no attempts at all
+    if totalAttempts == 0:
+        print(f"Warning: {playerName} has no recorded attempts. Using league average with adjustment.")
         leagueRate = getLeagueAverage(kickerData, distance)
-        weight = min(attempts / 10, 1.0)
-        return (weight * playerRate) + ((1 - weight) * leagueRate)
+        return 0.9 * leagueRate  # Minimal adjustment to avoid overconfidence
+    
+    # Get player's rate in the specific range (if available)
+    playerRangeRate = playerData[rateCol].values[0] if attempts > 0 else playerOverallRate
+    
+    # Calculate confidence weight based on total attempts (max weight at 10 attempts)
+    weight = min(totalAttempts / 10, 1.0)
+    
+    # Get league average (minimal influence, max 10% when no attempts)
+    leagueRate = getLeagueAverage(kickerData, distance)
+    leagueWeight = 0.1 if attempts == 0 else 0.05
+    
+    # Combine player's rate with minimal league average
+    if attempts > 0:
+        # Use range-specific rate if available, adjusted by overall performance
+        adjustedRate = (0.7 * playerRangeRate) + (0.3 * playerOverallRate)
+        probability = (weight * adjustedRate) + ((1 - weight) * playerOverallRate) + (leagueWeight * leagueRate)
+    else:
+        # When no attempts in range, rely on overall player stats with small league influence
+        probability = (0.9 * playerOverallRate) + (leagueWeight * leagueRate)
+    
+    return max(0.0, min(1.0, probability))
 
 def main():
-    """Main function to run the predictor interactively."""
+    """main function to run the predictor interactively."""
     # Load and clean data
     kickerData = loadAndCleanData()
     if kickerData is None:
