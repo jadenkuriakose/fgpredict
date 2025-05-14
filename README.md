@@ -54,9 +54,8 @@ The model expects a `data.csv` file with the following structure:
 - `FG_60_Plus_Attempted`, `FG_60_Plus_Made`: Attempts and successful kicks from 60+ yards
 
 ## Notes
-- If a kicker has no attempts in a distance range, the model uses the league average success rate.
+- If a kicker has no attempts in a distance range, the model estimates based off overall success near that range.
 - For kickers with limited attempts, predictions blend the player's success rate with the league average, weighted by attempt count.
-- The model assumes the data in `data.csv` is accurate and properly formatted.
 
 ## Future Improvements
 - Add support for additional features (e.g., weather conditions, home/away status).
