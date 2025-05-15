@@ -20,14 +20,12 @@ def load_data():
         # Calculate success rates for distance ranges (exclude 1-19)
         ranges = ['20_29', '30_39', '40_49', '50_59', '60_Plus']
         for r in ranges:
-            data[f'fg_{r}_rate'] = np.where(data[f'FG_{r}_Attempted'] > 0, 
-                                           data[f'FG_{r}_Made'] / data[f'FG_{r}_Attempted'], 0)
+            data[f'fg_{r}_rate'] = np.where(data[f'FG_{r}_Attempted'] > 0, data[f'FG_{r}_Made'] / data[f'FG_{r}_Attempted'], 0)
         
         # Calculate total attempts and success rate
         data['total_attempts'] = sum(data[f'FG_{r}_Attempted'] for r in ranges)
         data['total_made'] = sum(data[f'FG_{r}_Made'] for r in ranges)
-        data['overall_rate'] = np.where(data['total_attempts'] > 0,
-                                       data['total_made'] / data['total_attempts'], 0)
+        data['overall_rate'] = np.where(data['total_attempts'] > 0, data['total_made'] / data['total_attempts'], 0)
         
         # Handle missing values
         data = data.fillna(0)
@@ -46,7 +44,7 @@ def prepare_model_data(data):
         '40_49': [42, 45, 48], '50_59': [52, 55, 58], '60_Plus': [61, 63, 66]
     }
     
-    for _, kicker in data.iterrows():
+    for i, kicker in data.iterrows():
         for r, rate_col in [('20_29', 'fg_20_29_rate'), ('30_39', 'fg_30_39_rate'),
                            ('40_49', 'fg_40_49_rate'), ('50_59', 'fg_50_59_rate'),
                            ('60_Plus', 'fg_60_Plus_rate')]:
@@ -70,8 +68,7 @@ def prepare_model_data(data):
     kicks_df['dist_rate'] = kicks_df['distance'] * kicks_df['range_rate']
     
     player_dummies = pd.get_dummies(kicks_df['player'], prefix='player')
-    X = pd.concat([kicks_df[['distance', 'distance_sq', 'distance_cube', 'range_rate', 'dist_rate', 'longest', 'blocked']], 
-                   player_dummies], axis=1)
+    X = pd.concat([kicks_df[['distance', 'distance_sq', 'distance_cube', 'range_rate', 'dist_rate', 'longest', 'blocked']], player_dummies], axis=1)
     y = kicks_df['success']
     
     # Balance dataset with SMOTE for sparse ranges
